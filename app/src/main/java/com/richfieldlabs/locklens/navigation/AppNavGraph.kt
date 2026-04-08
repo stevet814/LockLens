@@ -1,7 +1,13 @@
 package com.richfieldlabs.locklens.navigation
 
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.biometric.BiometricManager
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -9,7 +15,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.richfieldlabs.locklens.auth.LockScreen
 import com.richfieldlabs.locklens.camera.CameraScreen
-import com.richfieldlabs.locklens.settings.SettingsScreen
 import com.richfieldlabs.locklens.vault.AlbumScreen
 import com.richfieldlabs.locklens.vault.PhotoDetailScreen
 import com.richfieldlabs.locklens.vault.VaultScreen
@@ -26,12 +31,27 @@ sealed class Screen(val route: String) {
     data object Album : Screen("album/{albumId}") {
         fun createRoute(albumId: Long) = "album/$albumId"
     }
-    data object Settings : Screen("settings")
 }
 
 @Composable
-fun AppNavGraph(modifier: Modifier = Modifier) {
-    val navController = rememberNavController()
+fun AppNavGraph(
+    modifier: Modifier = Modifier,
+    navController: NavHostController = rememberNavController(),
+) {
+    val context = LocalContext.current
+    val openBiometricSettings: () -> Unit = {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
+                putExtra(
+                    Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG,
+                )
+            }
+        } else {
+            Intent(Settings.ACTION_SECURITY_SETTINGS)
+        }
+        context.startActivity(intent)
+    }
 
     NavHost(
         navController = navController,
@@ -44,9 +64,6 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
                     navController.navigate(Screen.Vault.createRoute(decoy)) {
                         launchSingleTop = true
                     }
-                },
-                onOpenSettings = {
-                    navController.navigate(Screen.Settings.route)
                 },
             )
         }
@@ -64,9 +81,12 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
             VaultScreen(
                 decoyMode = decoyMode,
                 onOpenCamera = { navController.navigate(Screen.Camera.route) },
-                onOpenSettings = { navController.navigate(Screen.Settings.route) },
+                onOpenSettings = openBiometricSettings,
                 onOpenPhoto = { photoId ->
                     navController.navigate(Screen.PhotoDetail.createRoute(photoId))
+                },
+                onOpenAlbum = { albumId ->
+                    navController.navigate(Screen.Album.createRoute(albumId))
                 },
                 onBack = { navController.popBackStack() },
             )
@@ -79,31 +99,20 @@ fun AppNavGraph(modifier: Modifier = Modifier) {
         composable(
             route = Screen.PhotoDetail.route,
             arguments = listOf(navArgument("photoId") { type = NavType.LongType }),
-        ) { backStackEntry ->
-            val photoId = backStackEntry.arguments?.getLong("photoId") ?: 0L
-            PhotoDetailScreen(
-                photoId = photoId,
-                onBack = { navController.popBackStack() },
-            )
+        ) {
+            PhotoDetailScreen(onBack = { navController.popBackStack() })
         }
 
         composable(
             route = Screen.Album.route,
             arguments = listOf(navArgument("albumId") { type = NavType.LongType }),
-        ) { backStackEntry ->
-            val albumId = backStackEntry.arguments?.getLong("albumId") ?: 0L
+        ) {
             AlbumScreen(
-                albumId = albumId,
                 onBack = { navController.popBackStack() },
                 onOpenPhoto = { photoId ->
                     navController.navigate(Screen.PhotoDetail.createRoute(photoId))
                 },
             )
         }
-
-        composable(Screen.Settings.route) {
-            SettingsScreen(onBack = { navController.popBackStack() })
-        }
     }
 }
-

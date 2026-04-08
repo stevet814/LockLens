@@ -2,4 +2,7 @@
 <resources>
     <color name="launcher_background">#05090A</color>
     <color name="launcher_foreground">#FFFFFF</color>
+    <color name="launcher_gradient_start">#00D4B8</color>
+    <color name="launcher_gradient_center">#00CBAF</color>
+    <color name="launcher_gradient_end">#00BFA5</color>
 </resources>

@@ -17,7 +17,17 @@ import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+data class CameraUiState(
+    val isSaving: Boolean = false,
+    val error: String? = null,
+    val photoSaved: Boolean = false,
+)
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
@@ -25,12 +35,20 @@ class CameraViewModel @Inject constructor(
     private val cryptoManager: CryptoManager,
     private val photoRepository: PhotoRepository,
 ) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(CameraUiState())
+    val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
+
     fun saveToVault(tempFile: File, albumId: Long? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            val photoDirectory = File(context.filesDir, "vault/photos").apply { mkdirs() }
-            val thumbDirectory = File(context.filesDir, "vault/thumbs").apply { mkdirs() }
-
+            _uiState.update { it.copy(isSaving = true, error = null) }
             try {
+                // Strip EXIF before encryption — must happen before the bytes are read
+                ExifStripper.strip(tempFile)
+
+                val photoDirectory = File(context.filesDir, "vault/photos").apply { mkdirs() }
+                val thumbDirectory = File(context.filesDir, "vault/thumbs").apply { mkdirs() }
+
                 val encryptedPhoto = File(photoDirectory, "${UUID.randomUUID()}.enc")
                 val encryptedThumb = File(thumbDirectory, "${UUID.randomUUID()}.enc")
 
@@ -59,10 +77,21 @@ class CameraViewModel @Inject constructor(
                         capturedAt = System.currentTimeMillis(),
                     ),
                 )
+                _uiState.update { it.copy(isSaving = false, photoSaved = true) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isSaving = false, error = "Failed to save: ${e.message}") }
             } finally {
                 tempFile.delete()
             }
         }
+    }
+
+    fun consumePhotoSaved() {
+        _uiState.update { it.copy(photoSaved = false) }
+    }
+
+    fun onCaptureError(message: String) {
+        _uiState.update { it.copy(error = message) }
     }
 
     private fun generateThumbnailBytes(sourceFile: File): ByteArray {

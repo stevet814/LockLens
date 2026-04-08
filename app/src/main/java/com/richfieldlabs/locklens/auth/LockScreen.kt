@@ -5,40 +5,52 @@ import android.content.ContextWrapper
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
-import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.richfieldlabs.locklens.ui.components.EmptyState
-
-private const val ALLOWED_AUTHENTICATORS = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
 
 @Composable
 fun LockScreen(
     onUnlocked: (decoy: Boolean) -> Unit,
-    onOpenSettings: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -51,8 +63,9 @@ fun LockScreen(
 
     LaunchedEffect(uiState.unlockResult) {
         if (uiState.unlockResult) {
+            val decoy = uiState.decoyUnlocked
             viewModel.consumeUnlockResult()
-            onUnlocked(false)
+            onUnlocked(decoy)
         }
     }
 
@@ -65,7 +78,7 @@ fun LockScreen(
         }
 
         val biometricManager = BiometricManager.from(activity)
-        when (biometricManager.canAuthenticate(ALLOWED_AUTHENTICATORS)) {
+        when (biometricManager.canAuthenticate(BIOMETRIC_STRONG)) {
             BiometricManager.BIOMETRIC_SUCCESS -> {
                 launchBiometricPrompt(
                     activity = activity,
@@ -75,19 +88,19 @@ fun LockScreen(
             }
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
                 viewModel.onBiometricUnavailable(
-                    "Set up fingerprint, face unlock, or a device screen lock to open the vault.",
+                    "Set up fingerprint or face unlock to use biometrics. You can still unlock with your LockLens PIN.",
                 )
             }
             BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
             BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
             -> {
                 viewModel.onBiometricUnavailable(
-                    "This device does not currently have biometric or device credential auth available.",
+                    "Biometric unlock is not available on this device right now. Use your LockLens PIN.",
                 )
             }
             else -> {
                 viewModel.onBiometricUnavailable(
-                    "Android auth is temporarily unavailable. Try again in a moment.",
+                    "Biometric unlock is temporarily unavailable. Use your LockLens PIN or try again in a moment.",
                 )
             }
         }
@@ -99,71 +112,150 @@ fun LockScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = "LockLens",
-                    style = MaterialTheme.typography.headlineLarge,
-                )
-                Text(
-                    text = if (uiState.isOnboarding) {
-                        "Use Android biometrics or your device screen lock to initialize the vault."
-                    } else {
-                        "Unlock with Android biometrics or your device screen lock."
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                uiState.message?.let { message ->
-                    Card {
-                        Text(
-                            text = message,
-                            modifier = Modifier.padding(16.dp),
-                        )
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                text = "LockLens",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = uiState.setupMessage ?: if (uiState.hasRealPin) {
+                    "Enter PIN to unlock"
+                } else {
+                    "Secure your vault"
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // PIN Display
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                repeat(6) { index ->
+                    val isEntered = index < uiState.enteredPin.length
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isEntered) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            uiState.message?.let { message ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } ?: Spacer(modifier = Modifier.height(48.dp))
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Number Pad
+            Column(
+                modifier = Modifier.fillMaxWidth(0.8f),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                listOf(
+                    listOf("1", "2", "3"),
+                    listOf("4", "5", "6"),
+                    listOf("7", "8", "9"),
+                    listOf(null, "0", "delete")
+                ).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        row.forEach { key ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (key != null) {
+                                    if (key == "delete") {
+                                        IconButton(
+                                            onClick = viewModel::onPinDelete,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.Backspace,
+                                                contentDescription = "Delete",
+                                                tint = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    } else {
+                                        FilledTonalButton(
+                                            onClick = { viewModel.onPinDigitEntered(key) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(1f),
+                                            shape = CircleShape
+                                        ) {
+                                            Text(
+                                                text = key,
+                                                style = MaterialTheme.typography.headlineMedium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            Column(
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                EmptyState(
-                    icon = Icons.Default.Fingerprint,
-                    title = if (uiState.isOnboarding) {
-                        "Device-protected vault"
-                    } else {
-                        "Ready to unlock"
-                    },
-                    body = if (uiState.isOnboarding) {
-                        "No custom app PIN required. LockLens can use the same biometric or screen lock trust that Android already manages."
-                    } else {
-                        "Tap below if the prompt does not appear automatically."
-                    },
-                )
-                Button(
-                    onClick = viewModel::requestBiometricPrompt,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Unlock with biometrics")
+                if (uiState.hasRealPin) {
+                    TextButton(onClick = viewModel::requestBiometricPrompt) {
+                        Icon(Icons.Default.Fingerprint, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Biometric")
+                    }
                 }
-                OutlinedButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Open settings")
+                
+                if (uiState.enteredPin.length >= 4) {
+                    Button(onClick = viewModel::submitPin) {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (uiState.hasRealPin) "Unlock" else "Continue")
+                    }
                 }
             }
 
-            Text(
-                text = "The camera that forgets where you were.",
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -182,14 +274,14 @@ private fun launchBiometricPrompt(
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                    errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
                     errorCode == BiometricPrompt.ERROR_CANCELED
                 ) {
-                    onFailure("Authentication canceled.")
-                } else {
-                    onFailure(errString.toString())
+                    return
                 }
+
+                onFailure(errString.toString())
             }
 
             override fun onAuthenticationFailed() {
@@ -200,8 +292,9 @@ private fun launchBiometricPrompt(
 
     val promptInfo = BiometricPrompt.PromptInfo.Builder()
         .setTitle("Unlock LockLens")
-        .setSubtitle("Use your Android biometric or device screen lock")
-        .setAllowedAuthenticators(ALLOWED_AUTHENTICATORS)
+        .setSubtitle("Use fingerprint or face unlock, or choose your LockLens PIN")
+        .setAllowedAuthenticators(BIOMETRIC_STRONG)
+        .setNegativeButtonText("Use PIN")
         .build()
 
     prompt.authenticate(promptInfo)

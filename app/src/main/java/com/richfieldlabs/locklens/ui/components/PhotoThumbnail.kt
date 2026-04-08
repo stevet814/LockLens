@@ -1,65 +1,74 @@
 package com.richfieldlabs.locklens.ui.components
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.richfieldlabs.locklens.data.model.Photo
-import java.text.DateFormat
-import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PhotoThumbnail(
     photo: Photo,
+    loadThumbnail: suspend () -> ByteArray,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    val bitmap by produceState<ImageBitmap?>(null, photo.id) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val bytes = loadThumbnail()
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Icon(
-                imageVector = Icons.Default.Image,
+        val bmp = bitmap
+        if (bmp != null) {
+            Image(
+                bitmap = bmp,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = photo.label.ifBlank {
-                        DateFormat.getDateTimeInstance(
-                            DateFormat.MEDIUM,
-                            DateFormat.SHORT,
-                        ).format(Date(photo.capturedAt))
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                )
-                Text(
-                    text = "${photo.originalWidth} x ${photo.originalHeight}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        } else {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp,
+            )
         }
     }
 }

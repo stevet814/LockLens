@@ -15,11 +15,16 @@ import kotlinx.coroutines.launch
 
 data class AuthUiState(
     val isOnboarding: Boolean = true,
+    val hasRealPin: Boolean = false,
     val hasDecoyPin: Boolean = false,
     val autoPromptBiometric: Boolean = true,
     val message: String? = null,
     val unlockResult: Boolean = false,
+    val decoyUnlocked: Boolean = false,
     val biometricPromptRequest: Int = 0,
+    val enteredPin: String = "",
+    val isConfirmingPin: Boolean = false,
+    val setupMessage: String? = null,
 )
 
 @HiltViewModel
@@ -28,27 +33,43 @@ class AuthViewModel @Inject constructor(
 ) : ViewModel() {
     private val message = MutableStateFlow<String?>(null)
     private val unlockResult = MutableStateFlow(false)
+    private val decoyUnlocked = MutableStateFlow(false)
     private val biometricPromptRequest = MutableStateFlow(0)
+    private val enteredPin = MutableStateFlow("")
+    private val isConfirmingPin = MutableStateFlow(false)
+    private var firstPinAttempt = ""
+
+    private data class MutableSnapshot(
+        val notice: String?,
+        val unlockResult: Boolean,
+        val decoyUnlocked: Boolean,
+        val biometricPromptRequest: Int,
+    )
 
     val uiState = combine(
         authRepository.authPreferences,
-        message,
-        unlockResult,
-        biometricPromptRequest,
-    ) { preferences, notice, result, promptRequest ->
+        combine(message, unlockResult, decoyUnlocked, biometricPromptRequest) { m, r, d, p ->
+            MutableSnapshot(m, r, d, p)
+        },
+        enteredPin,
+        isConfirmingPin,
+    ) { preferences, snap, pin, confirming ->
         AuthUiState(
             isOnboarding = !preferences.isVaultInitialized,
+            hasRealPin = preferences.hasRealPin,
             hasDecoyPin = preferences.hasDecoyPin,
             autoPromptBiometric = preferences.biometricEnabled,
-            message = notice ?: run {
-                if (!preferences.isVaultInitialized) {
-                    "Use your device biometric or screen lock to protect this vault on this phone."
-                } else {
-                    "Unlock with your device biometric or screen lock."
-                }
+            message = snap.notice,
+            unlockResult = snap.unlockResult,
+            decoyUnlocked = snap.decoyUnlocked,
+            biometricPromptRequest = snap.biometricPromptRequest,
+            enteredPin = pin,
+            isConfirmingPin = confirming,
+            setupMessage = when {
+                !preferences.hasRealPin && !confirming -> "Create a master PIN to protect your vault."
+                !preferences.hasRealPin && confirming -> "Confirm your master PIN."
+                else -> null
             },
-            unlockResult = result,
-            biometricPromptRequest = promptRequest,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -58,7 +79,8 @@ class AuthViewModel @Inject constructor(
 
     fun onScreenShown() {
         viewModelScope.launch {
-            if (authRepository.authPreferences.first().biometricEnabled) {
+            val prefs = authRepository.authPreferences.first()
+            if (prefs.biometricEnabled && prefs.hasRealPin) {
                 requestBiometricPrompt()
             }
         }
@@ -73,6 +95,7 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             authRepository.markVaultInitialized()
             unlockResult.value = true
+            decoyUnlocked.value = false
         }
     }
 
@@ -80,13 +103,90 @@ class AuthViewModel @Inject constructor(
         this.message.value = message
     }
 
-    fun consumeUnlockResult() {
-        unlockResult.value = false
-    }
-
-    fun setAutoPromptBiometric(enabled: Boolean) {
-        viewModelScope.launch {
-            authRepository.setBiometricEnabled(enabled)
+    fun onPinDigitEntered(digit: String) {
+        if (enteredPin.value.length < 6) {
+            enteredPin.update { it + digit }
+            if (enteredPin.value.length >= 4) {
+                // Auto-submit or just wait for user? Usually 4-6 digits.
+                // For now, let's wait for the user to reach a certain length or have a submit button?
+                // The task says "4-6 digits". Let's auto-submit at 6, but allow 4 or 5.
+                // Actually, let's just let them type and maybe they hit a checkmark or it auto-submits at 6.
+                if (enteredPin.value.length == 6) {
+                    submitPin()
+                }
+            }
         }
     }
+
+    fun onPinDelete() {
+        enteredPin.update { if (it.isNotEmpty()) it.dropLast(1) else it }
+    }
+
+    fun submitPin() {
+        val pin = enteredPin.value
+        if (pin.length < 4) {
+            message.value = "PIN must be at least 4 digits."
+            return
+        }
+
+        viewModelScope.launch {
+            val prefs = authRepository.authPreferences.first()
+            if (!prefs.hasRealPin) {
+                handlePinSetup(pin)
+            } else {
+                handlePinUnlock(pin)
+            }
+        }
+    }
+
+    private suspend fun handlePinSetup(pin: String) {
+        if (!isConfirmingPin.value) {
+            firstPinAttempt = pin
+            enteredPin.value = ""
+            isConfirmingPin.value = true
+            message.value = null
+        } else {
+            if (pin == firstPinAttempt) {
+                authRepository.setRealPin(pin)
+                authRepository.markVaultInitialized()
+                unlockResult.value = true
+                decoyUnlocked.value = false
+                message.value = "PIN set successfully."
+            } else {
+                message.value = "PINs do not match. Try again."
+                enteredPin.value = ""
+                isConfirmingPin.value = false
+                firstPinAttempt = ""
+            }
+        }
+    }
+
+    private suspend fun handlePinUnlock(pin: String) {
+        when (authRepository.checkPin(pin)) {
+            PinResult.REAL -> {
+                unlockResult.value = true
+                decoyUnlocked.value = false
+                enteredPin.value = ""
+            }
+            PinResult.DECOY -> {
+                unlockResult.value = true
+                decoyUnlocked.value = true
+                enteredPin.value = ""
+            }
+            PinResult.WRONG -> {
+                message.value = "Incorrect PIN."
+                enteredPin.value = ""
+            }
+            PinResult.UNSET -> {
+                // Should not happen if hasRealPin is true
+                message.value = "PIN not set."
+            }
+        }
+    }
+
+    fun consumeUnlockResult() {
+        unlockResult.value = false
+        decoyUnlocked.value = false
+    }
+
 }
