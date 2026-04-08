@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.richfieldlabs.locklens.auth.AuthFallbackMode
 import com.richfieldlabs.locklens.auth.PinResult
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -18,6 +19,7 @@ data class AuthPreferences(
     val hasRealPin: Boolean = false,
     val hasDecoyPin: Boolean = false,
     val biometricEnabled: Boolean = true,
+    val fallbackMode: AuthFallbackMode = AuthFallbackMode.DEVICE_CREDENTIAL,
     val isProUnlocked: Boolean = false,
 )
 
@@ -26,11 +28,14 @@ class AuthRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
 ) {
     val authPreferences: Flow<AuthPreferences> = dataStore.data.map { preferences ->
+        val hasRealPin = preferences[REAL_PIN_HASH] != null
         AuthPreferences(
             isVaultInitialized = preferences[VAULT_INITIALIZED] ?: false,
-            hasRealPin = preferences[REAL_PIN_HASH] != null,
+            hasRealPin = hasRealPin,
             hasDecoyPin = preferences[DECOY_PIN_HASH] != null,
             biometricEnabled = preferences[BIOMETRIC_ENABLED] ?: true,
+            fallbackMode = AuthFallbackMode.fromStorageValue(preferences[AUTH_FALLBACK_MODE])
+                ?: if (hasRealPin) AuthFallbackMode.APP_PIN else AuthFallbackMode.DEVICE_CREDENTIAL,
             isProUnlocked = preferences[PRO_UNLOCKED] ?: false,
         )
     }
@@ -56,6 +61,12 @@ class AuthRepository @Inject constructor(
     suspend fun setBiometricEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[BIOMETRIC_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setFallbackMode(mode: AuthFallbackMode) {
+        dataStore.edit { preferences ->
+            preferences[AUTH_FALLBACK_MODE] = mode.storageValue
         }
     }
 
@@ -96,6 +107,7 @@ class AuthRepository @Inject constructor(
         val REAL_PIN_HASH = stringPreferencesKey("pref_real_pin_hash")
         val DECOY_PIN_HASH = stringPreferencesKey("pref_decoy_pin_hash")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("pref_biometric_enabled")
+        val AUTH_FALLBACK_MODE = stringPreferencesKey("pref_auth_fallback_mode")
         val PRO_UNLOCKED = booleanPreferencesKey("pref_pro_unlocked")
     }
 }

@@ -17,6 +17,7 @@ import com.richfieldlabs.locklens.auth.LockScreen
 import com.richfieldlabs.locklens.camera.CameraScreen
 import com.richfieldlabs.locklens.vault.AlbumScreen
 import com.richfieldlabs.locklens.vault.PhotoDetailScreen
+import com.richfieldlabs.locklens.vault.VaultSettingsScreen
 import com.richfieldlabs.locklens.vault.VaultScreen
 
 sealed class Screen(val route: String) {
@@ -31,6 +32,7 @@ sealed class Screen(val route: String) {
     data object Album : Screen("album/{albumId}") {
         fun createRoute(albumId: Long) = "album/$albumId"
     }
+    data object Settings : Screen("settings")
 }
 
 @Composable
@@ -39,12 +41,13 @@ fun AppNavGraph(
     navController: NavHostController = rememberNavController(),
 ) {
     val context = LocalContext.current
-    val openBiometricSettings: () -> Unit = {
+    val openDeviceSecuritySettings: () -> Unit = {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
                 putExtra(
                     Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG,
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL,
                 )
             }
         } else {
@@ -65,6 +68,7 @@ fun AppNavGraph(
                         launchSingleTop = true
                     }
                 },
+                onOpenDeviceSecuritySettings = openDeviceSecuritySettings,
             )
         }
 
@@ -81,7 +85,7 @@ fun AppNavGraph(
             VaultScreen(
                 decoyMode = decoyMode,
                 onOpenCamera = { navController.navigate(Screen.Camera.route) },
-                onOpenSettings = openBiometricSettings,
+                onOpenSettings = { navController.navigate(Screen.Settings.route) },
                 onOpenPhoto = { photoId ->
                     navController.navigate(Screen.PhotoDetail.createRoute(photoId))
                 },
@@ -112,6 +116,13 @@ fun AppNavGraph(
                 onOpenPhoto = { photoId ->
                     navController.navigate(Screen.PhotoDetail.createRoute(photoId))
                 },
+            )
+        }
+
+        composable(Screen.Settings.route) {
+            VaultSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenDeviceSecuritySettings = openDeviceSecuritySettings,
             )
         }
     }

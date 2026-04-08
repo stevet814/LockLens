@@ -18,6 +18,7 @@ data class AuthUiState(
     val hasRealPin: Boolean = false,
     val hasDecoyPin: Boolean = false,
     val autoPromptBiometric: Boolean = true,
+    val fallbackMode: AuthFallbackMode = AuthFallbackMode.DEVICE_CREDENTIAL,
     val message: String? = null,
     val unlockResult: Boolean = false,
     val decoyUnlocked: Boolean = false,
@@ -59,6 +60,7 @@ class AuthViewModel @Inject constructor(
             hasRealPin = preferences.hasRealPin,
             hasDecoyPin = preferences.hasDecoyPin,
             autoPromptBiometric = preferences.biometricEnabled,
+            fallbackMode = preferences.fallbackMode,
             message = snap.notice,
             unlockResult = snap.unlockResult,
             decoyUnlocked = snap.decoyUnlocked,
@@ -66,8 +68,10 @@ class AuthViewModel @Inject constructor(
             enteredPin = pin,
             isConfirmingPin = confirming,
             setupMessage = when {
-                !preferences.hasRealPin && !confirming -> "Create a master PIN to protect your vault."
-                !preferences.hasRealPin && confirming -> "Confirm your master PIN."
+                preferences.fallbackMode == AuthFallbackMode.APP_PIN && !preferences.hasRealPin && !confirming ->
+                    "Create a master PIN to protect your vault."
+                preferences.fallbackMode == AuthFallbackMode.APP_PIN && !preferences.hasRealPin && confirming ->
+                    "Confirm your master PIN."
                 else -> null
             },
         )
@@ -80,7 +84,9 @@ class AuthViewModel @Inject constructor(
     fun onScreenShown() {
         viewModelScope.launch {
             val prefs = authRepository.authPreferences.first()
-            if (prefs.biometricEnabled && prefs.hasRealPin) {
+            if (prefs.biometricEnabled &&
+                (prefs.fallbackMode == AuthFallbackMode.DEVICE_CREDENTIAL || prefs.hasRealPin)
+            ) {
                 requestBiometricPrompt()
             }
         }
