@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(./gradlew assembleDebug)",
+      "WebSearch",
+      "Bash(cat /c/tmp/claudeprojects/Offscript/docs/*.md)",
+      "Bash(grep -rn \"subscription\\\\|price\\\\|billing\\\\|premium\\\\|pro\\\\|\\\\$\\\\|revenue\\\\|monetiz\" /c/tmp/claudeprojects/Offscript/app/src/main/java/)",
+      "Bash(adb devices:*)",
+      "Bash(emulator -list-avds)",
+      "Bash(xargs grep:*)",
+      "Bash(ls /c/tmp/claudeprojects/LockLens/app/src/main/res/drawable/ ls /c/tmp/claudeprojects/LockLens/app/src/main/res/mipmap-*)"
+    ]
+  }
+}
