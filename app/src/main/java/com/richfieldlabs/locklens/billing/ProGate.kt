@@ -1,40 +1,33 @@
 package com.richfieldlabs.locklens.billing
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 
+/**
+ * Renders [content] as-is when Pro is unlocked.
+ * When not Pro, an invisible overlay intercepts all taps and calls [onUpgradeClick].
+ */
 @Composable
 fun ProGate(
     isProUnlocked: Boolean,
-    featureName: String,
     onUpgradeClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (isProUnlocked) {
+    Box {
         content()
-    } else {
-        Card {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = "$featureName is a Pro feature.",
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text("Upgrade once to unlock the full privacy toolkit.")
-                Button(onClick = onUpgradeClick) {
-                    Text("Upgrade to Pro")
-                }
-            }
+        if (!isProUnlocked) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) { onUpgradeClick() },
+            )
         }
     }
 }

@@ -40,7 +40,11 @@ fun PhotoThumbnail(
         value = withContext(Dispatchers.IO) {
             try {
                 val bytes = loadThumbnail()
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                try {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                } finally {
+                    bytes.fill(0)
+                }
             } catch (_: Exception) {
                 null
             }

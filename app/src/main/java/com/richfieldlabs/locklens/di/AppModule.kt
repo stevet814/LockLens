@@ -32,7 +32,7 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "locklens.db",
-        ).fallbackToDestructiveMigration().build()
+        ).addMigrations(AppDatabase.MIGRATION_1_2).build()
     }
 
     @Provides

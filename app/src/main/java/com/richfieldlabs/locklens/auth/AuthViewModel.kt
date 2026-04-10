@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.richfieldlabs.locklens.data.repository.AuthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -31,6 +32,7 @@ data class AuthUiState(
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val intruderDetector: IntruderDetector,
 ) : ViewModel() {
     private val message = MutableStateFlow<String?>(null)
     private val unlockResult = MutableStateFlow(false)
@@ -84,6 +86,12 @@ class AuthViewModel @Inject constructor(
     fun onScreenShown() {
         viewModelScope.launch {
             val prefs = authRepository.authPreferences.first()
+            if (prefs.hasRealPin) {
+                val remainingLockoutMillis = authRepository.getRemainingPinLockoutMillis()
+                if (remainingLockoutMillis > 0L) {
+                    message.value = PinLockoutPolicy.buildMessage(remainingLockoutMillis)
+                }
+            }
             if (prefs.biometricEnabled &&
                 (prefs.fallbackMode == AuthFallbackMode.DEVICE_CREDENTIAL || prefs.hasRealPin)
             ) {
@@ -99,6 +107,7 @@ class AuthViewModel @Inject constructor(
 
     fun onBiometricAuthenticated() {
         viewModelScope.launch {
+            authRepository.resetFailedAttempts()
             authRepository.markVaultInitialized()
             unlockResult.value = true
             decoyUnlocked.value = false
@@ -113,10 +122,6 @@ class AuthViewModel @Inject constructor(
         if (enteredPin.value.length < 6) {
             enteredPin.update { it + digit }
             if (enteredPin.value.length >= 4) {
-                // Auto-submit or just wait for user? Usually 4-6 digits.
-                // For now, let's wait for the user to reach a certain length or have a submit button?
-                // The task says "4-6 digits". Let's auto-submit at 6, but allow 4 or 5.
-                // Actually, let's just let them type and maybe they hit a checkmark or it auto-submits at 6.
                 if (enteredPin.value.length == 6) {
                     submitPin()
                 }
@@ -139,9 +144,17 @@ class AuthViewModel @Inject constructor(
             val prefs = authRepository.authPreferences.first()
             if (!prefs.hasRealPin) {
                 handlePinSetup(pin)
-            } else {
-                handlePinUnlock(pin)
+                return@launch
             }
+
+            val remainingLockoutMillis = authRepository.getRemainingPinLockoutMillis()
+            if (remainingLockoutMillis > 0L) {
+                enteredPin.value = ""
+                message.value = PinLockoutPolicy.buildMessage(remainingLockoutMillis)
+                return@launch
+            }
+
+            handlePinUnlock(pin)
         }
     }
 
@@ -153,6 +166,7 @@ class AuthViewModel @Inject constructor(
             message.value = null
         } else {
             if (pin == firstPinAttempt) {
+                authRepository.resetFailedAttempts()
                 authRepository.setRealPin(pin)
                 authRepository.markVaultInitialized()
                 unlockResult.value = true
@@ -170,21 +184,43 @@ class AuthViewModel @Inject constructor(
     private suspend fun handlePinUnlock(pin: String) {
         when (authRepository.checkPin(pin)) {
             PinResult.REAL -> {
+                authRepository.resetFailedAttempts()
                 unlockResult.value = true
                 decoyUnlocked.value = false
                 enteredPin.value = ""
             }
             PinResult.DECOY -> {
+                authRepository.resetFailedAttempts()
                 unlockResult.value = true
                 decoyUnlocked.value = true
                 enteredPin.value = ""
             }
             PinResult.WRONG -> {
-                message.value = "Incorrect PIN."
+                val failedAttempt = authRepository.registerFailedPinAttempt()
+                val remainder = failedAttempt.totalAttempts % IntruderDetector.FAILED_ATTEMPTS_THRESHOLD
+                val attemptsUntilDetection = if (remainder == 0) {
+                    IntruderDetector.FAILED_ATTEMPTS_THRESHOLD
+                } else {
+                    IntruderDetector.FAILED_ATTEMPTS_THRESHOLD - remainder
+                }
+                val baseMessage = if (attemptsUntilDetection < IntruderDetector.FAILED_ATTEMPTS_THRESHOLD) {
+                    "Incorrect PIN. $attemptsUntilDetection more attempt${if (attemptsUntilDetection == 1) "" else "s"} before intrusion detection."
+                } else {
+                    "Incorrect PIN."
+                }
+                val lockoutMessage = if (failedAttempt.lockoutRemainingMillis > 0L) {
+                    " ${PinLockoutPolicy.buildMessage(failedAttempt.lockoutRemainingMillis)}"
+                } else {
+                    ""
+                }
+                message.value = baseMessage + lockoutMessage
                 enteredPin.value = ""
+                val capturePhoto = remainder == 0
+                viewModelScope.launch(Dispatchers.IO) {
+                    intruderDetector.onFailedPinAttempt(pin, capturePhoto)
+                }
             }
             PinResult.UNSET -> {
-                // Should not happen if hasRealPin is true
                 message.value = "PIN not set."
             }
         }
@@ -194,5 +230,4 @@ class AuthViewModel @Inject constructor(
         unlockResult.value = false
         decoyUnlocked.value = false
     }
-
 }

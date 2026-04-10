@@ -5,9 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,7 +14,6 @@ import com.richfieldlabs.locklens.ui.components.EmptyState
 
 @Composable
 fun DecoyVault(
-    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -27,13 +24,9 @@ fun DecoyVault(
         verticalArrangement = Arrangement.Center,
     ) {
         EmptyState(
-            icon = Icons.Default.VisibilityOff,
-            title = "Nothing to see here",
-            body = "This decoy vault looks empty by design.",
+            icon = Icons.Default.Shield,
+            title = "Your vault is empty",
+            body = "Protected photos and videos will appear here.",
         )
-        OutlinedButton(onClick = onOpenSettings) {
-            Text("Open settings")
-        }
     }
 }
-

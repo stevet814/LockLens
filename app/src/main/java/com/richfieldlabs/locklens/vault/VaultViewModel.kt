@@ -3,10 +3,12 @@ package com.richfieldlabs.locklens.vault
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.richfieldlabs.locklens.billing.BillingManager
 import com.richfieldlabs.locklens.camera.ExifStripper
 import com.richfieldlabs.locklens.crypto.CryptoManager
 import com.richfieldlabs.locklens.data.model.Album
@@ -45,6 +47,7 @@ class VaultViewModel @Inject constructor(
     private val albumRepository: AlbumRepository,
     private val cryptoManager: CryptoManager,
     private val authRepository: AuthRepository,
+    private val billingManager: BillingManager,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -102,12 +105,14 @@ class VaultViewModel @Inject constructor(
                         skipped++
                         continue
                     }
+                    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val isVideo = mimeType.startsWith("video/")
                     val tempFile = File(context.cacheDir, "import_${UUID.randomUUID()}.tmp")
                     try {
                         context.contentResolver.openInputStream(uri)?.use { input ->
                             tempFile.outputStream().use { input.copyTo(it) }
                         }
-                        ExifStripper.strip(tempFile)
+                        if (!isVideo) ExifStripper.strip(tempFile)
 
                         val photoDir = File(context.filesDir, "vault/photos").apply { mkdirs() }
                         val thumbDir = File(context.filesDir, "vault/thumbs").apply { mkdirs() }
@@ -115,11 +120,20 @@ class VaultViewModel @Inject constructor(
                         val encThumb = File(thumbDir, "${UUID.randomUUID()}.enc")
 
                         val photoIv = tempFile.inputStream().use { cryptoManager.encrypt(it, encPhoto) }
-                        val thumbBytes = generateThumbnailBytes(tempFile)
+                        val thumbBytes = if (isVideo) {
+                            generateVideoThumbnailBytes(tempFile)
+                        } else {
+                            generateThumbnailBytes(tempFile)
+                        }
                         val thumbIv = ByteArrayInputStream(thumbBytes).use { cryptoManager.encrypt(it, encThumb) }
 
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(tempFile.absolutePath, bounds)
+                        val (width, height) = if (isVideo) {
+                            getVideoDimensions(tempFile)
+                        } else {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeFile(tempFile.absolutePath, bounds)
+                            Pair(bounds.outWidth.coerceAtLeast(0), bounds.outHeight.coerceAtLeast(0))
+                        }
 
                         photoRepository.insert(
                             Photo(
@@ -128,9 +142,9 @@ class VaultViewModel @Inject constructor(
                                 encryptedThumbPath = encThumb.absolutePath,
                                 iv = Base64.encodeToString(photoIv, Base64.NO_WRAP),
                                 thumbIv = Base64.encodeToString(thumbIv, Base64.NO_WRAP),
-                                mimeType = context.contentResolver.getType(uri) ?: "image/jpeg",
-                                originalWidth = bounds.outWidth.coerceAtLeast(0),
-                                originalHeight = bounds.outHeight.coerceAtLeast(0),
+                                mimeType = mimeType,
+                                originalWidth = width,
+                                originalHeight = height,
                                 capturedAt = System.currentTimeMillis(),
                             ),
                         )
@@ -158,6 +172,39 @@ class VaultViewModel @Inject constructor(
     fun createAlbum(name: String) {
         viewModelScope.launch {
             albumRepository.insert(Album(name = name.trim()))
+        }
+    }
+
+    fun launchPurchaseFlow(activity: android.app.Activity) {
+        billingManager.launchPurchaseFlow(activity)
+    }
+
+    private fun generateVideoThumbnailBytes(sourceFile: File): ByteArray {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(sourceFile.absolutePath)
+            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
+            val scaled = Bitmap.createScaledBitmap(frame, 256, 256, true)
+            ByteArrayOutputStream().also { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                if (frame !== scaled) frame.recycle()
+                scaled.recycle()
+            }.toByteArray()
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun getVideoDimensions(sourceFile: File): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(sourceFile.absolutePath)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            Pair(w, h)
+        } finally {
+            retriever.release()
         }
     }
 

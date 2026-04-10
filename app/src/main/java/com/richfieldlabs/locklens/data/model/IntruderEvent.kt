@@ -7,7 +7,7 @@ import androidx.room.PrimaryKey
 data class IntruderEvent(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val encryptedSelfieFilePath: String? = null,
+    val selfieIv: String? = null,
     val attemptedPin: String,
     val attemptedAt: Long = System.currentTimeMillis(),
 )
-

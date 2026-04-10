@@ -16,9 +16,10 @@ import androidx.navigation.navArgument
 import com.richfieldlabs.locklens.auth.LockScreen
 import com.richfieldlabs.locklens.camera.CameraScreen
 import com.richfieldlabs.locklens.vault.AlbumScreen
+import com.richfieldlabs.locklens.vault.IntruderLogScreen
 import com.richfieldlabs.locklens.vault.PhotoDetailScreen
-import com.richfieldlabs.locklens.vault.VaultSettingsScreen
 import com.richfieldlabs.locklens.vault.VaultScreen
+import com.richfieldlabs.locklens.vault.VaultSettingsScreen
 
 sealed class Screen(val route: String) {
     data object Lock : Screen("lock")
@@ -33,6 +34,7 @@ sealed class Screen(val route: String) {
         fun createRoute(albumId: Long) = "album/$albumId"
     }
     data object Settings : Screen("settings")
+    data object Intruders : Screen("intruders")
 }
 
 @Composable
@@ -123,7 +125,12 @@ fun AppNavGraph(
             VaultSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenDeviceSecuritySettings = openDeviceSecuritySettings,
+                onOpenIntruderLog = { navController.navigate(Screen.Intruders.route) },
             )
+        }
+
+        composable(Screen.Intruders.route) {
+            IntruderLogScreen(onBack = { navController.popBackStack() })
         }
     }
 }

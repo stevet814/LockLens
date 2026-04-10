@@ -1,4 +1,4 @@
-# LockLens — Claude Code Build Plan
+    # LockLens — Claude Code Build Plan
 
 **App:** LockLens – Private Photo Vault
 **Package:** `com.richfieldlabs.locklens`

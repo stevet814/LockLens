@@ -1,14 +1,20 @@
 package com.richfieldlabs.locklens.vault
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -20,7 +26,6 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,10 +50,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.richfieldlabs.locklens.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.richfieldlabs.locklens.auth.DecoyVault
+import com.richfieldlabs.locklens.billing.ProGate
+import com.richfieldlabs.locklens.billing.ProUpgradeSheet
 import com.richfieldlabs.locklens.data.model.Photo
 import com.richfieldlabs.locklens.ui.components.EmptyState
 import com.richfieldlabs.locklens.ui.components.PhotoThumbnail
@@ -69,10 +82,11 @@ fun VaultScreen(
     var photoToDelete by remember { mutableStateOf<Photo?>(null) }
     var showCreateAlbumDialog by remember { mutableStateOf(false) }
     var newAlbumName by remember { mutableStateOf("") }
+    var showUpgradeSheet by remember { mutableStateOf(false) }
 
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents(),
-    ) { uris -> if (uris.isNotEmpty()) viewModel.importPhotos(uris) }
+    val importLauncher = rememberLauncherForActivityResult(OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) viewModel.importPhotos(uris)
+    }
 
     LaunchedEffect(uiState.importError) {
         uiState.importError?.let { error ->
@@ -85,10 +99,32 @@ fun VaultScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(if (decoyMode) "Vault" else "Encrypted vault") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.Default.Shield, contentDescription = "Vault")
+                title = {
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.locklens_mark),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .scale(1.35f),
+                                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onPrimary),
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = "LockLens",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 },
                 actions = {
@@ -96,16 +132,16 @@ fun VaultScreen(
                         if (uiState.isImporting) {
                             CircularProgressIndicator(modifier = Modifier.padding(12.dp))
                         } else {
-                            IconButton(onClick = { importLauncher.launch("image/*") }) {
+                            IconButton(onClick = { importLauncher.launch(arrayOf("image/*", "video/*")) }) {
                                 Icon(
                                     imageVector = Icons.Default.AddPhotoAlternate,
                                     contentDescription = "Import from gallery",
                                 )
                             }
                         }
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
                 },
             )
@@ -120,14 +156,11 @@ fun VaultScreen(
     ) { innerPadding ->
         when {
             decoyMode -> {
-                DecoyVault(
-                    onOpenSettings = onOpenSettings,
-                    modifier = Modifier.padding(innerPadding),
-                )
+                DecoyVault(modifier = Modifier.padding(innerPadding))
             }
             uiState.photos.isEmpty() -> {
                 EmptyState(
-                    icon = Icons.Default.Shield,
+                    icon = Icons.Default.CameraAlt,
                     title = "Your vault is empty",
                     body = "Tap the camera button to take a private photo, or use the import button to add photos from your gallery.",
                     modifier = Modifier
@@ -141,16 +174,17 @@ fun VaultScreen(
                         .fillMaxSize()
                         .padding(innerPadding),
                 ) {
-                    // Album section — Pro only
-                    if (uiState.isProUnlocked) {
+                    // Albums row — always shown; overlay intercepts taps when not Pro
+                    ProGate(
+                        isProUnlocked = uiState.isProUnlocked,
+                        onUpgradeClick = { showUpgradeSheet = true },
+                    ) {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             items(uiState.albums, key = { it.id }) { album ->
-                                Card(
-                                    onClick = { onOpenAlbum(album.id) },
-                                ) {
+                                Card(onClick = { onOpenAlbum(album.id) }) {
                                     Column(
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -177,10 +211,7 @@ fun VaultScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CreateNewFolder,
-                                            contentDescription = null,
-                                        )
+                                        Icon(imageVector = Icons.Default.CreateNewFolder, contentDescription = null)
                                         Text("New album", style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
@@ -231,7 +262,7 @@ fun VaultScreen(
         )
     }
 
-    // Create album dialog (Pro)
+    // Create album dialog
     if (showCreateAlbumDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -251,9 +282,7 @@ fun VaultScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (newAlbumName.isNotBlank()) {
-                            viewModel.createAlbum(newAlbumName)
-                        }
+                        if (newAlbumName.isNotBlank()) viewModel.createAlbum(newAlbumName)
                         showCreateAlbumDialog = false
                         newAlbumName = ""
                     },
@@ -263,14 +292,10 @@ fun VaultScreen(
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        showCreateAlbumDialog = false
-                        newAlbumName = ""
-                    },
-                ) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = {
+                    showCreateAlbumDialog = false
+                    newAlbumName = ""
+                }) { Text("Cancel") }
             },
         )
     }
@@ -295,5 +320,16 @@ fun VaultScreen(
                 )
             }
         }
+    }
+
+    // Pro upgrade sheet
+    if (showUpgradeSheet) {
+        ProUpgradeSheet(
+            onDismiss = { showUpgradeSheet = false },
+            onPurchaseClick = { activity ->
+                viewModel.launchPurchaseFlow(activity)
+                showUpgradeSheet = false
+            },
+        )
     }
 }
