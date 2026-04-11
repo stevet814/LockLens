@@ -46,6 +46,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.richfieldlabs.locklens.billing.ProFeatureLockedState
+import com.richfieldlabs.locklens.billing.ProUpgradeSheet
 
 @Composable
 fun PhotoDetailScreen(
@@ -55,6 +57,19 @@ fun PhotoDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showUpgradeSheet by remember { mutableStateOf(false) }
+    fun openUpgradeSheet() {
+        showUpgradeSheet = true
+    }
+    fun dismissUpgradeSheet() {
+        showUpgradeSheet = false
+    }
+    fun openDeleteDialog() {
+        showDeleteDialog = true
+    }
+    fun dismissDeleteDialog() {
+        showDeleteDialog = false
+    }
 
     // Share launcher — deletes temp file after intent is handled
     val shareLauncher = rememberLauncherForActivityResult(
@@ -134,6 +149,21 @@ fun PhotoDetailScreen(
                 )
             }
 
+            uiState.isVideoLocked -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ProFeatureLockedState(
+                        title = "Video vault is a Pro feature",
+                        body = "Upgrade to play encrypted videos and keep every media type together in LockLens.",
+                        onUpgradeClick = ::openUpgradeSheet,
+                    )
+                }
+            }
+
             uiState.error != null -> {
                 Text(
                     text = uiState.error!!,
@@ -159,8 +189,16 @@ fun PhotoDetailScreen(
             }
 
             Row {
-                if (uiState.photo != null && uiState.isProUnlocked) {
-                    IconButton(onClick = { viewModel.prepareShare() }) {
+                if (uiState.photo != null) {
+                    IconButton(
+                        onClick = {
+                            if (uiState.isProUnlocked) {
+                                viewModel.prepareShare()
+                            } else {
+                                openUpgradeSheet()
+                            }
+                        },
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Share",
@@ -169,7 +207,7 @@ fun PhotoDetailScreen(
                     }
                 }
                 if (uiState.photo != null) {
-                    IconButton(onClick = { showDeleteDialog = true }) {
+                    IconButton(onClick = ::openDeleteDialog) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete",
@@ -181,15 +219,25 @@ fun PhotoDetailScreen(
         }
     }
 
+    if (showUpgradeSheet) {
+        ProUpgradeSheet(
+            onDismiss = ::dismissUpgradeSheet,
+            onPurchaseClick = { activity ->
+                viewModel.launchPurchaseFlow(activity)
+                dismissUpgradeSheet()
+            },
+        )
+    }
+
     if (showDeleteDialog) {
         AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
+            onDismissRequest = ::dismissDeleteDialog,
             title = { Text("Delete photo?") },
             text = { Text("This permanently deletes the encrypted photo. It cannot be recovered.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showDeleteDialog = false
+                        dismissDeleteDialog()
                         viewModel.deletePhoto(onDeleted = onBack)
                     },
                 ) {
@@ -197,7 +245,7 @@ fun PhotoDetailScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
+                TextButton(onClick = ::dismissDeleteDialog) {
                     Text("Cancel")
                 }
             },

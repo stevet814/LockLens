@@ -1,5 +1,7 @@
 package com.richfieldlabs.locklens.navigation
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -43,20 +45,7 @@ fun AppNavGraph(
     navController: NavHostController = rememberNavController(),
 ) {
     val context = LocalContext.current
-    val openDeviceSecuritySettings: () -> Unit = {
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
-                putExtra(
-                    Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                        BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-                )
-            }
-        } else {
-            Intent(Settings.ACTION_SECURITY_SETTINGS)
-        }
-        context.startActivity(intent)
-    }
+    val openDeviceSecuritySettings: () -> Unit = { context.openDeviceSecuritySettings() }
 
     NavHost(
         navController = navController,
@@ -94,7 +83,6 @@ fun AppNavGraph(
                 onOpenAlbum = { albumId ->
                     navController.navigate(Screen.Album.createRoute(albumId))
                 },
-                onBack = { navController.popBackStack() },
             )
         }
 
@@ -133,4 +121,32 @@ fun AppNavGraph(
             IntruderLogScreen(onBack = { navController.popBackStack() })
         }
     }
+}
+
+private fun Context.openDeviceSecuritySettings() {
+    val launchIntent = buildList {
+        // Prefer the general security screen because the buttons promise settings,
+        // not only enrollment, and this remains useful after setup is complete.
+        add(Intent(Settings.ACTION_SECURITY_SETTINGS))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            add(
+                Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
+                    putExtra(
+                        Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                        BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                            BiometricManager.Authenticators.DEVICE_CREDENTIAL,
+                    )
+                },
+            )
+        }
+        add(Intent(Settings.ACTION_SETTINGS))
+    }.firstOrNull { candidate ->
+        candidate.resolveActivity(packageManager) != null
+    }?.apply {
+        if (this@openDeviceSecuritySettings !is Activity) {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
+    launchIntent?.let(::startActivity)
 }

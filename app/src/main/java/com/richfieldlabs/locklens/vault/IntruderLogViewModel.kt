@@ -1,14 +1,17 @@
 package com.richfieldlabs.locklens.vault
 
+import android.app.Activity
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.richfieldlabs.locklens.billing.BillingManager
 import com.richfieldlabs.locklens.crypto.CryptoManager
 import com.richfieldlabs.locklens.data.db.IntruderDao
 import com.richfieldlabs.locklens.data.model.IntruderEvent
+import com.richfieldlabs.locklens.data.repository.AuthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -17,22 +20,32 @@ import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 data class IntruderLogUiState(
     val events: List<IntruderEvent> = emptyList(),
+    val isProUnlocked: Boolean = false,
 )
 
 @HiltViewModel
 class IntruderLogViewModel @Inject constructor(
-    private val intruderDao: IntruderDao,
+    intruderDao: IntruderDao,
     private val cryptoManager: CryptoManager,
+    authRepository: AuthRepository,
+    private val billingManager: BillingManager,
 ) : ViewModel() {
 
-    val uiState = intruderDao.observeAll()
-        .map { IntruderLogUiState(events = it) }
+    val uiState = combine(
+        intruderDao.observeAll(),
+        authRepository.authPreferences,
+    ) { events, prefs ->
+        IntruderLogUiState(
+            events = events,
+            isProUnlocked = prefs.isProUnlocked,
+        )
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -56,5 +69,9 @@ class IntruderLogViewModel @Inject constructor(
                 null
             }
         }
+    }
+
+    fun launchPurchaseFlow(activity: Activity) {
+        billingManager.launchPurchaseFlow(activity)
     }
 }

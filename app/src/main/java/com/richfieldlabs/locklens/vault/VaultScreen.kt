@@ -1,5 +1,7 @@
 package com.richfieldlabs.locklens.vault
 
+import android.graphics.BitmapFactory
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments
 import androidx.compose.foundation.Image
@@ -14,12 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CameraAlt
@@ -51,14 +53,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.richfieldlabs.locklens.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.richfieldlabs.locklens.R
 import com.richfieldlabs.locklens.auth.DecoyVault
 import com.richfieldlabs.locklens.billing.ProGate
 import com.richfieldlabs.locklens.billing.ProUpgradeSheet
@@ -74,18 +77,55 @@ fun VaultScreen(
     onOpenSettings: () -> Unit,
     onOpenPhoto: (Long) -> Unit,
     onOpenAlbum: (Long) -> Unit,
-    onBack: () -> Unit,
     viewModel: VaultViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val brandMark = remember(context) {
+        BitmapFactory.decodeResource(context.resources, R.drawable.locklens_mark).asImageBitmap()
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     var photoToDelete by remember { mutableStateOf<Photo?>(null) }
     var showCreateAlbumDialog by remember { mutableStateOf(false) }
     var newAlbumName by remember { mutableStateOf("") }
     var showUpgradeSheet by remember { mutableStateOf(false) }
+    fun openUpgradeSheet() {
+        showUpgradeSheet = true
+    }
+    fun dismissUpgradeSheet() {
+        showUpgradeSheet = false
+    }
+    fun queuePhotoDeletion(photo: Photo) {
+        photoToDelete = photo
+    }
+    fun clearPhotoDeletion() {
+        photoToDelete = null
+    }
+    fun openCreateAlbumDialog() {
+        showCreateAlbumDialog = true
+    }
+    fun dismissCreateAlbumDialog() {
+        showCreateAlbumDialog = false
+        newAlbumName = ""
+    }
 
     val importLauncher = rememberLauncherForActivityResult(OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) viewModel.importPhotos(uris)
+        if (uris.isNotEmpty()) {
+            val importableUris = if (uiState.isProUnlocked) {
+                uris
+            } else {
+                uris.filterNot { uri ->
+                    context.contentResolver.getType(uri)?.startsWith("video/") == true
+                }
+            }
+
+            if (importableUris.isNotEmpty()) {
+                viewModel.importPhotos(importableUris)
+            }
+            if (importableUris.size != uris.size) {
+                openUpgradeSheet()
+            }
+        }
     }
 
     LaunchedEffect(uiState.importError) {
@@ -111,12 +151,13 @@ fun VaultScreen(
                             contentAlignment = Alignment.Center,
                         ) {
                             Image(
-                                painter = painterResource(R.drawable.locklens_mark),
+                                bitmap = brandMark,
                                 contentDescription = null,
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .scale(1.35f),
+                                    .padding(2.dp),
                                 colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onPrimary),
+                                filterQuality = FilterQuality.High,
                             )
                         }
                         Spacer(Modifier.width(10.dp))
@@ -132,7 +173,15 @@ fun VaultScreen(
                         if (uiState.isImporting) {
                             CircularProgressIndicator(modifier = Modifier.padding(12.dp))
                         } else {
-                            IconButton(onClick = { importLauncher.launch(arrayOf("image/*", "video/*")) }) {
+                            IconButton(
+                                onClick = {
+                                    if (!uiState.isProUnlocked && uiState.photos.size >= 100) {
+                                        openUpgradeSheet()
+                                    } else {
+                                        importLauncher.launch(arrayOf("image/*", "video/*"))
+                                    }
+                                },
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.AddPhotoAlternate,
                                     contentDescription = "Import from gallery",
@@ -158,6 +207,7 @@ fun VaultScreen(
             decoyMode -> {
                 DecoyVault(modifier = Modifier.padding(innerPadding))
             }
+
             uiState.photos.isEmpty() -> {
                 EmptyState(
                     icon = Icons.Default.CameraAlt,
@@ -168,16 +218,16 @@ fun VaultScreen(
                         .padding(innerPadding),
                 )
             }
+
             else -> {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
                 ) {
-                    // Albums row — always shown; overlay intercepts taps when not Pro
                     ProGate(
                         isProUnlocked = uiState.isProUnlocked,
-                        onUpgradeClick = { showUpgradeSheet = true },
+                        onUpgradeClick = ::openUpgradeSheet,
                     ) {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -201,7 +251,7 @@ fun VaultScreen(
                             }
                             item {
                                 Card(
-                                    onClick = { showCreateAlbumDialog = true },
+                                    onClick = ::openCreateAlbumDialog,
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                     ),
@@ -230,8 +280,14 @@ fun VaultScreen(
                             PhotoThumbnail(
                                 photo = photo,
                                 loadThumbnail = { viewModel.decryptThumbnail(photo) },
-                                onClick = { onOpenPhoto(photo.id) },
-                                onLongClick = { photoToDelete = photo },
+                                onClick = {
+                                    if (!uiState.isProUnlocked && photo.mimeType.startsWith("video/")) {
+                                        openUpgradeSheet()
+                                    } else {
+                                        onOpenPhoto(photo.id)
+                                    }
+                                },
+                                onLongClick = { queuePhotoDeletion(photo) },
                             )
                         }
                     }
@@ -240,35 +296,30 @@ fun VaultScreen(
         }
     }
 
-    // Long-press delete confirmation
     photoToDelete?.let { photo ->
         AlertDialog(
-            onDismissRequest = { photoToDelete = null },
+            onDismissRequest = ::clearPhotoDeletion,
             title = { Text("Delete photo?") },
             text = { Text("This permanently deletes the encrypted photo. It cannot be recovered.") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deletePhoto(photo)
-                        photoToDelete = null
+                        clearPhotoDeletion()
                     },
                 ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { photoToDelete = null }) { Text("Cancel") }
+                TextButton(onClick = ::clearPhotoDeletion) { Text("Cancel") }
             },
         )
     }
 
-    // Create album dialog
     if (showCreateAlbumDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showCreateAlbumDialog = false
-                newAlbumName = ""
-            },
+            onDismissRequest = ::dismissCreateAlbumDialog,
             title = { Text("New album") },
             text = {
                 OutlinedTextField(
@@ -283,8 +334,7 @@ fun VaultScreen(
                 TextButton(
                     onClick = {
                         if (newAlbumName.isNotBlank()) viewModel.createAlbum(newAlbumName)
-                        showCreateAlbumDialog = false
-                        newAlbumName = ""
+                        dismissCreateAlbumDialog()
                     },
                     enabled = newAlbumName.isNotBlank(),
                 ) {
@@ -292,15 +342,13 @@ fun VaultScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showCreateAlbumDialog = false
-                    newAlbumName = ""
-                }) { Text("Cancel") }
+                TextButton(onClick = ::dismissCreateAlbumDialog) {
+                    Text("Cancel")
+                }
             },
         )
     }
 
-    // Free-tier limit banner
     if (!decoyMode && !uiState.isProUnlocked && uiState.photos.size >= 90) {
         Box(
             modifier = Modifier
@@ -309,26 +357,35 @@ fun VaultScreen(
             contentAlignment = Alignment.Center,
         ) {
             Card(
+                onClick = ::openUpgradeSheet,
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                 ),
             ) {
-                Text(
-                    text = "${uiState.photos.size}/100 photos — upgrade to Pro for unlimited.",
-                    style = MaterialTheme.typography.bodySmall,
+                Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "${uiState.photos.size}/100 photos - upgrade to Pro for unlimited.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = "Tap to unlock the full vault.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
 
-    // Pro upgrade sheet
     if (showUpgradeSheet) {
         ProUpgradeSheet(
-            onDismiss = { showUpgradeSheet = false },
+            onDismiss = ::dismissUpgradeSheet,
             onPurchaseClick = { activity ->
                 viewModel.launchPurchaseFlow(activity)
-                showUpgradeSheet = false
+                dismissUpgradeSheet()
             },
         )
     }

@@ -198,16 +198,7 @@ class AuthViewModel @Inject constructor(
             PinResult.WRONG -> {
                 val failedAttempt = authRepository.registerFailedPinAttempt()
                 val remainder = failedAttempt.totalAttempts % IntruderDetector.FAILED_ATTEMPTS_THRESHOLD
-                val attemptsUntilDetection = if (remainder == 0) {
-                    IntruderDetector.FAILED_ATTEMPTS_THRESHOLD
-                } else {
-                    IntruderDetector.FAILED_ATTEMPTS_THRESHOLD - remainder
-                }
-                val baseMessage = if (attemptsUntilDetection < IntruderDetector.FAILED_ATTEMPTS_THRESHOLD) {
-                    "Incorrect PIN. $attemptsUntilDetection more attempt${if (attemptsUntilDetection == 1) "" else "s"} before intrusion detection."
-                } else {
-                    "Incorrect PIN."
-                }
+                val baseMessage = "Incorrect PIN."
                 val lockoutMessage = if (failedAttempt.lockoutRemainingMillis > 0L) {
                     " ${PinLockoutPolicy.buildMessage(failedAttempt.lockoutRemainingMillis)}"
                 } else {

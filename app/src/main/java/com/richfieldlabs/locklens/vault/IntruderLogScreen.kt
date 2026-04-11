@@ -28,7 +28,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +40,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.richfieldlabs.locklens.billing.ProFeatureLockedState
+import com.richfieldlabs.locklens.billing.ProUpgradeSheet
 import com.richfieldlabs.locklens.data.model.IntruderEvent
 import com.richfieldlabs.locklens.ui.components.EmptyState
 
@@ -47,6 +52,13 @@ fun IntruderLogScreen(
     viewModel: IntruderLogViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showUpgradeSheet by remember { mutableStateOf(false) }
+    fun openUpgradeSheet() {
+        showUpgradeSheet = true
+    }
+    fun dismissUpgradeSheet() {
+        showUpgradeSheet = false
+    }
 
     Scaffold(
         topBar = {
@@ -63,7 +75,21 @@ fun IntruderLogScreen(
             )
         },
     ) { innerPadding ->
-        if (uiState.events.isEmpty()) {
+        if (!uiState.isProUnlocked) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ProFeatureLockedState(
+                    title = "Intrusion log is a Pro feature",
+                    body = "Upgrade to review failed unlock attempts and any break-in selfies captured by LockLens.",
+                    onUpgradeClick = ::openUpgradeSheet,
+                )
+            }
+        } else if (uiState.events.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.PersonOff,
                 title = "No intrusion attempts",
@@ -85,6 +111,16 @@ fun IntruderLogScreen(
                 }
             }
         }
+    }
+
+    if (showUpgradeSheet) {
+        ProUpgradeSheet(
+            onDismiss = ::dismissUpgradeSheet,
+            onPurchaseClick = { activity ->
+                viewModel.launchPurchaseFlow(activity)
+                dismissUpgradeSheet()
+            },
+        )
     }
 }
 

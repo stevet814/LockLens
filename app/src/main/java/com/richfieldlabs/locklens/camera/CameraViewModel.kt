@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.richfieldlabs.locklens.crypto.CryptoManager
@@ -44,7 +45,7 @@ class CameraViewModel @Inject constructor(
             _uiState.update { it.copy(isSaving = true, error = null) }
             try {
                 // Strip EXIF before encryption — must happen before the bytes are read
-                ExifStripper.strip(tempFile)
+                val sanitizedMimeType = ExifStripper.strip(tempFile, "image/jpeg")
 
                 val photoDirectory = File(context.filesDir, "vault/photos").apply { mkdirs() }
                 val thumbDirectory = File(context.filesDir, "vault/thumbs").apply { mkdirs() }
@@ -71,7 +72,7 @@ class CameraViewModel @Inject constructor(
                         encryptedThumbPath = encryptedThumb.absolutePath,
                         iv = Base64.encodeToString(photoIv, Base64.NO_WRAP),
                         thumbIv = Base64.encodeToString(thumbIv, Base64.NO_WRAP),
-                        mimeType = "image/jpeg",
+                        mimeType = sanitizedMimeType,
                         originalWidth = bounds.outWidth.coerceAtLeast(0),
                         originalHeight = bounds.outHeight.coerceAtLeast(0),
                         capturedAt = System.currentTimeMillis(),
@@ -98,11 +99,11 @@ class CameraViewModel @Inject constructor(
         val source = BitmapFactory.decodeFile(sourceFile.absolutePath)
             ?: error("Unable to decode source image for thumbnail generation.")
         val thumbSize = 256
-        val scaled = Bitmap.createScaledBitmap(source, thumbSize, thumbSize, true)
-        val output = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 88, output)
-        source.recycle()
-        scaled.recycle()
-        return output.toByteArray()
+        val scaled = source.scale(thumbSize, thumbSize)
+        return ByteArrayOutputStream().also { output ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, 88, output)
+            if (source !== scaled) source.recycle()
+            scaled.recycle()
+        }.toByteArray()
     }
 }

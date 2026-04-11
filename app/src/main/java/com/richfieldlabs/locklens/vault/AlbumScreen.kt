@@ -1,5 +1,6 @@
 package com.richfieldlabs.locklens.vault
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,10 +25,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.richfieldlabs.locklens.billing.ProFeatureLockedState
+import com.richfieldlabs.locklens.billing.ProUpgradeSheet
 import com.richfieldlabs.locklens.data.model.Photo
 import com.richfieldlabs.locklens.ui.components.EmptyState
 import com.richfieldlabs.locklens.ui.components.PhotoThumbnail
@@ -41,6 +45,19 @@ fun AlbumScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var photoToDelete by remember { mutableStateOf<Photo?>(null) }
+    var showUpgradeSheet by remember { mutableStateOf(false) }
+    fun openUpgradeSheet() {
+        showUpgradeSheet = true
+    }
+    fun dismissUpgradeSheet() {
+        showUpgradeSheet = false
+    }
+    fun queuePhotoDeletion(photo: Photo) {
+        photoToDelete = photo
+    }
+    fun clearPhotoDeletion() {
+        photoToDelete = null
+    }
 
     Scaffold(
         topBar = {
@@ -57,7 +74,21 @@ fun AlbumScreen(
             )
         },
     ) { innerPadding ->
-        if (uiState.photos.isEmpty()) {
+        if (!uiState.isProUnlocked) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ProFeatureLockedState(
+                    title = "Albums are a Pro feature",
+                    body = "Upgrade to organize your vault into albums and browse them here.",
+                    onUpgradeClick = ::openUpgradeSheet,
+                )
+            }
+        } else if (uiState.photos.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.Folder,
                 title = "Album is empty",
@@ -81,30 +112,40 @@ fun AlbumScreen(
                         photo = photo,
                         loadThumbnail = { viewModel.decryptThumbnail(photo) },
                         onClick = { onOpenPhoto(photo.id) },
-                        onLongClick = { photoToDelete = photo },
+                        onLongClick = { queuePhotoDeletion(photo) },
                     )
                 }
             }
         }
     }
 
+    if (showUpgradeSheet) {
+        ProUpgradeSheet(
+            onDismiss = ::dismissUpgradeSheet,
+            onPurchaseClick = { activity ->
+                viewModel.launchPurchaseFlow(activity)
+                dismissUpgradeSheet()
+            },
+        )
+    }
+
     photoToDelete?.let { photo ->
         AlertDialog(
-            onDismissRequest = { photoToDelete = null },
+            onDismissRequest = ::clearPhotoDeletion,
             title = { Text("Delete photo?") },
             text = { Text("This permanently deletes the encrypted photo. It cannot be recovered.") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deletePhoto(photo)
-                        photoToDelete = null
+                        clearPhotoDeletion()
                     },
                 ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { photoToDelete = null }) { Text("Cancel") }
+                TextButton(onClick = ::clearPhotoDeletion) { Text("Cancel") }
             },
         )
     }

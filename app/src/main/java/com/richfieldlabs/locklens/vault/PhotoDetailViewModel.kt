@@ -1,5 +1,6 @@
 package com.richfieldlabs.locklens.vault
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -11,6 +12,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.richfieldlabs.locklens.billing.BillingManager
 import com.richfieldlabs.locklens.crypto.CryptoManager
 import com.richfieldlabs.locklens.data.model.Photo
 import com.richfieldlabs.locklens.data.repository.AuthRepository
@@ -23,7 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.update
@@ -36,6 +38,7 @@ data class PhotoDetailUiState(
     val videoUri: Uri? = null,
     val isLoading: Boolean = true,
     val isProUnlocked: Boolean = false,
+    val isVideoLocked: Boolean = false,
     val shareUri: Uri? = null,
     val error: String? = null,
 )
@@ -47,6 +50,7 @@ class PhotoDetailViewModel @Inject constructor(
     private val photoRepository: PhotoRepository,
     private val cryptoManager: CryptoManager,
     private val authRepository: AuthRepository,
+    private val billingManager: BillingManager,
 ) : ViewModel() {
 
     private val photoId: Long = checkNotNull(savedStateHandle["photoId"])
@@ -65,7 +69,29 @@ class PhotoDetailViewModel @Inject constructor(
     private fun observeProState() {
         viewModelScope.launch {
             authRepository.authPreferences.collect { prefs ->
-                _uiState.update { it.copy(isProUnlocked = prefs.isProUnlocked) }
+                val photo = _uiState.value.photo
+                val shouldUnlockVideo = prefs.isProUnlocked &&
+                    _uiState.value.isVideoLocked &&
+                    photo?.mimeType?.startsWith("video/") == true
+
+                _uiState.update {
+                    it.copy(
+                        isProUnlocked = prefs.isProUnlocked,
+                        isVideoLocked = photo?.mimeType?.startsWith("video/") == true && !prefs.isProUnlocked,
+                    )
+                }
+
+                if (shouldUnlockVideo) {
+                    val currentPhoto = photo ?: return@collect
+                    _uiState.update {
+                        it.copy(
+                            isLoading = true,
+                            isVideoLocked = false,
+                            error = null,
+                        )
+                    }
+                    loadVideo(currentPhoto)
+                }
             }
         }
     }
@@ -76,9 +102,27 @@ class PhotoDetailViewModel @Inject constructor(
                 .filterNotNull()
                 .take(1)
                 .collect { photo ->
-                    _uiState.update { it.copy(photo = photo) }
+                    val isProUnlocked = authRepository.authPreferences.first().isProUnlocked
+                    val isVideo = photo.mimeType.startsWith("video/")
 
-                    if (photo.mimeType.startsWith("video/")) {
+                    _uiState.update {
+                        it.copy(
+                            photo = photo,
+                            isProUnlocked = isProUnlocked,
+                            isVideoLocked = isVideo && !isProUnlocked,
+                        )
+                    }
+
+                    if (isVideo && !isProUnlocked) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                videoUri = null,
+                                isVideoLocked = true,
+                                error = null,
+                            )
+                        }
+                    } else if (isVideo) {
                         loadVideo(photo)
                     } else {
                         loadImage(photo)
@@ -104,7 +148,9 @@ class PhotoDetailViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 bitmap = bitmap,
+                videoUri = null,
                 isLoading = false,
+                isVideoLocked = false,
                 error = if (bitmap == null) "Could not decrypt photo." else null,
             )
         }
@@ -131,8 +177,10 @@ class PhotoDetailViewModel @Inject constructor(
         }
         _uiState.update {
             it.copy(
+                bitmap = null,
                 videoUri = uri,
                 isLoading = false,
+                isVideoLocked = false,
                 error = if (uri == null) "Could not decrypt video." else null,
             )
         }
@@ -140,6 +188,7 @@ class PhotoDetailViewModel @Inject constructor(
 
     /** Decrypts the current item to cacheDir/shared/ and emits a shareable URI. */
     fun prepareShare() {
+        if (!_uiState.value.isProUnlocked) return
         val photo = _uiState.value.photo ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -174,6 +223,10 @@ class PhotoDetailViewModel @Inject constructor(
         _uiState.update { it.copy(shareUri = null) }
         tempShareFile?.delete()
         tempShareFile = null
+    }
+
+    fun launchPurchaseFlow(activity: Activity) {
+        billingManager.launchPurchaseFlow(activity)
     }
 
     fun deletePhoto(onDeleted: () -> Unit) {

@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Base64
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.richfieldlabs.locklens.billing.BillingManager
@@ -74,7 +76,6 @@ class VaultViewModel @Inject constructor(
         initialValue = VaultUiState(),
     )
 
-    /** Called from PhotoThumbnail's produceState block — runs on IO dispatcher. */
     fun decryptThumbnail(photo: Photo): ByteArray {
         val iv = Base64.decode(photo.thumbIv, Base64.NO_WRAP)
         return cryptoManager.decrypt(File(photo.encryptedThumbPath), iv)
@@ -90,29 +91,43 @@ class VaultViewModel @Inject constructor(
 
     fun importPhotos(uris: List<Uri>) {
         if (importState.value.isImporting) return
+
         viewModelScope.launch {
             importState.update { it.copy(isImporting = true, error = null) }
             val prefs = authRepository.authPreferences.first()
             val limit = if (prefs.isProUnlocked) Int.MAX_VALUE else 100
+            val allowVideos = prefs.isProUnlocked
 
             withContext(Dispatchers.IO) {
                 var imported = 0
-                var skipped = 0
+                var skippedForLimit = 0
+                var skippedForPro = 0
                 val currentCount = photoRepository.count()
 
                 for (uri in uris) {
                     if (currentCount + imported >= limit) {
-                        skipped++
+                        skippedForLimit++
                         continue
                     }
-                    val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-                    val isVideo = mimeType.startsWith("video/")
+
+                    val originalMimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val isVideo = originalMimeType.startsWith("video/")
+                    if (isVideo && !allowVideos) {
+                        skippedForPro++
+                        continue
+                    }
+
                     val tempFile = File(context.cacheDir, "import_${UUID.randomUUID()}.tmp")
                     try {
                         context.contentResolver.openInputStream(uri)?.use { input ->
                             tempFile.outputStream().use { input.copyTo(it) }
                         }
-                        if (!isVideo) ExifStripper.strip(tempFile)
+
+                        val sanitizedMimeType = if (isVideo) {
+                            originalMimeType
+                        } else {
+                            ExifStripper.strip(tempFile, originalMimeType)
+                        }
 
                         val photoDir = File(context.filesDir, "vault/photos").apply { mkdirs() }
                         val thumbDir = File(context.filesDir, "vault/thumbs").apply { mkdirs() }
@@ -142,7 +157,7 @@ class VaultViewModel @Inject constructor(
                                 encryptedThumbPath = encThumb.absolutePath,
                                 iv = Base64.encodeToString(photoIv, Base64.NO_WRAP),
                                 thumbIv = Base64.encodeToString(thumbIv, Base64.NO_WRAP),
-                                mimeType = mimeType,
+                                mimeType = sanitizedMimeType,
                                 originalWidth = width,
                                 originalHeight = height,
                                 capturedAt = System.currentTimeMillis(),
@@ -150,16 +165,21 @@ class VaultViewModel @Inject constructor(
                         )
                         imported++
                     } catch (_: Exception) {
-                        // skip unreadable files
+                        // Skip unreadable files.
                     } finally {
                         tempFile.delete()
                     }
                 }
 
-                val error = if (skipped > 0)
-                    "$imported imported, $skipped skipped — vault limit reached. Upgrade to Pro for unlimited."
-                else
-                    null
+                val error = buildList {
+                    if (skippedForPro > 0) {
+                        add("$skippedForPro video items require Pro.")
+                    }
+                    if (skippedForLimit > 0) {
+                        add("$imported imported, $skippedForLimit skipped - vault limit reached. Upgrade to Pro for unlimited.")
+                    }
+                }.joinToString(" ").ifBlank { null }
+
                 importState.update { it.copy(isImporting = false, error = error) }
             }
         }
@@ -171,6 +191,7 @@ class VaultViewModel @Inject constructor(
 
     fun createAlbum(name: String) {
         viewModelScope.launch {
+            if (!authRepository.authPreferences.first().isProUnlocked) return@launch
             albumRepository.insert(Album(name = name.trim()))
         }
     }
@@ -184,8 +205,8 @@ class VaultViewModel @Inject constructor(
         return try {
             retriever.setDataSource(sourceFile.absolutePath)
             val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: Bitmap.createBitmap(256, 256, Bitmap.Config.RGB_565)
-            val scaled = Bitmap.createScaledBitmap(frame, 256, 256, true)
+                ?: createBitmap(256, 256, Bitmap.Config.RGB_565)
+            val scaled = frame.scale(256, 256)
             ByteArrayOutputStream().also { out ->
                 scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
                 if (frame !== scaled) frame.recycle()
@@ -211,10 +232,10 @@ class VaultViewModel @Inject constructor(
     private fun generateThumbnailBytes(sourceFile: File): ByteArray {
         val source = BitmapFactory.decodeFile(sourceFile.absolutePath)
             ?: error("Unable to decode image for thumbnail.")
-        val scaled = Bitmap.createScaledBitmap(source, 256, 256, true)
+        val scaled = source.scale(256, 256)
         return ByteArrayOutputStream().also { out ->
             scaled.compress(Bitmap.CompressFormat.JPEG, 88, out)
-            source.recycle()
+            if (source !== scaled) source.recycle()
             scaled.recycle()
         }.toByteArray()
     }

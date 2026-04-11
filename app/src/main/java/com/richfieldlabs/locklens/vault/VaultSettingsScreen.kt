@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -79,6 +80,12 @@ fun VaultSettingsScreen(
     var changePinNew by remember { mutableStateOf("") }
     var changePinInput by remember { mutableStateOf("") }
 
+    var showSetupPinDialog by remember { mutableStateOf(false) }
+    var setupPinStep by remember { mutableIntStateOf(1) }
+    var setupPinFirst by remember { mutableStateOf("") }
+    var setupPinInput by remember { mutableStateOf("") }
+    var setupPinError by remember { mutableStateOf<String?>(null) }
+
     fun resetChangePinDialog() {
         showChangePinDialog = false
         changePinStep = 1
@@ -86,6 +93,15 @@ fun VaultSettingsScreen(
         changePinNew = ""
         changePinInput = ""
         viewModel.consumeChangePinResult()
+    }
+
+    fun resetSetupPinDialog() {
+        showSetupPinDialog = false
+        setupPinStep = 1
+        setupPinFirst = ""
+        setupPinInput = ""
+        setupPinError = null
+        viewModel.consumeSetupPinResult()
     }
 
     LaunchedEffect(uiState.changePinSuccess) {
@@ -104,6 +120,16 @@ fun VaultSettingsScreen(
         }
     }
 
+    LaunchedEffect(uiState.setupPinError) {
+        uiState.setupPinError?.let { setupPinError = it }
+    }
+
+    LaunchedEffect(uiState.setupPinSuccess) {
+        if (uiState.setupPinSuccess) {
+            resetSetupPinDialog()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -113,12 +139,52 @@ fun VaultSettingsScreen(
                 },
             )
         },
+        bottomBar = {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val saveMessage = when {
+                        uiState.saveValidationMessage != null -> uiState.saveValidationMessage
+                        uiState.hasUnsavedChanges -> "Changes won't apply until you tap Save."
+                        else -> uiState.settingsSavedMessage
+                    }
+                    if (saveMessage != null) {
+                        Text(
+                            text = saveMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = when {
+                                uiState.saveValidationMessage != null -> MaterialTheme.colorScheme.error
+                                uiState.hasUnsavedChanges -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.primary
+                            },
+                        )
+                    }
+                    Button(
+                        onClick = viewModel::saveSettings,
+                        enabled = uiState.canSave,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        },
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (uiState.isProUnlocked) {
@@ -165,14 +231,33 @@ fun VaultSettingsScreen(
                 }
             }
 
-            if (uiState.fallbackMode == AuthFallbackMode.APP_PIN && uiState.hasAppPin) {
+            if (uiState.fallbackMode == AuthFallbackMode.APP_PIN || uiState.hasAppPin) {
                 item {
                     SectionCard(title = "LockLens PIN") {
+                        Text(
+                            text = if (uiState.hasAppPin) {
+                                if (uiState.fallbackMode == AuthFallbackMode.APP_PIN) {
+                                    "Your vault-only PIN is set and ready to use as the biometric fallback."
+                                } else {
+                                    "Your vault-only PIN is set. Save the fallback choice below when you're ready to use it."
+                                }
+                            } else {
+                                "Set a 4 to 6 digit LockLens PIN before saving this fallback."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         OutlinedButton(
-                            onClick = { showChangePinDialog = true },
+                            onClick = {
+                                if (uiState.hasAppPin) {
+                                    showChangePinDialog = true
+                                } else {
+                                    showSetupPinDialog = true
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Change PIN")
+                            Text(if (uiState.hasAppPin) "Change PIN" else "Set PIN")
                         }
                     }
                 }
@@ -269,7 +354,7 @@ fun VaultSettingsScreen(
                     description = if (uiState.hasAppPin) {
                         "Uses a vault-only PIN instead of your phone credential."
                     } else {
-                        "Uses a vault-only PIN. You'll create it the next time the vault locks."
+                        "Uses a vault-only PIN. Set it below before saving this fallback."
                     },
                     selected = uiState.fallbackMode == AuthFallbackMode.APP_PIN,
                     onClick = { viewModel.selectFallbackMode(AuthFallbackMode.APP_PIN) },
@@ -328,6 +413,40 @@ fun VaultSettingsScreen(
                 }
             },
             onDismiss = { resetDecoyDialog() },
+        )
+    }
+
+    if (showSetupPinDialog) {
+        PinEntryDialog(
+            title = if (setupPinStep == 1) "Set LockLens PIN" else "Confirm LockLens PIN",
+            hint = if (setupPinStep == 1) {
+                "Create a 4 to 6 digit PIN for LockLens."
+            } else {
+                "Enter the same PIN again."
+            },
+            label = if (setupPinStep == 1) "New PIN" else "Confirm PIN",
+            value = setupPinInput,
+            onValueChange = {
+                if (it.all(Char::isDigit) && it.length <= 6) {
+                    setupPinInput = it
+                    setupPinError = null
+                }
+            },
+            error = setupPinError,
+            confirmLabel = if (setupPinStep == 1) "Next" else "Save",
+            onConfirm = {
+                if (setupPinStep == 1) {
+                    setupPinFirst = setupPinInput
+                    setupPinInput = ""
+                    setupPinStep = 2
+                } else if (setupPinInput == setupPinFirst) {
+                    viewModel.setInitialRealPin(setupPinInput)
+                } else {
+                    setupPinError = "PINs do not match."
+                    setupPinInput = ""
+                }
+            },
+            onDismiss = { resetSetupPinDialog() },
         )
     }
 
